@@ -1,3 +1,4 @@
+
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
@@ -12,48 +13,76 @@ public class PlayerControllerFPS : MonoBehaviour
     public Camera playerCamera;
 
     private Rigidbody rb;
+    private Vector2 moveInput;
     private float currentSpeed;
+
+    void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+
+        // Персонаж не должен заваливаться набок.
+        rb.freezeRotation = true;
+
+        // Делаем движение визуально плавнее.
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+
+        // Коллизии проверяются надёжнее при быстром движении.
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+    }
 
     void Start()
     {
-        rb = GetComponent<Rigidbody>();
-        rb.freezeRotation = true;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-
         if (playerCamera == null)
         {
-            Debug.LogError("PlayerControllerFPS: playerCamera не назначена! Перетащи Main Camera в это поле.");
+            Debug.LogError(
+                "PlayerControllerFPS: не назначена камера игрока!"
+            );
         }
     }
 
     void Update()
     {
+        // Считываем нажатия в Update.
+        moveInput.x = Input.GetAxisRaw("Horizontal");
+        moveInput.y = Input.GetAxisRaw("Vertical");
+
+        currentSpeed = Input.GetKey(KeyCode.LeftShift)
+            ? sprintSpeed
+            : moveSpeed;
+    }
+
+    void FixedUpdate()
+    {
         if (playerCamera == null)
-        {
-            Debug.LogWarning("PlayerControllerFPS: playerCamera = null, движение отключено!");
             return;
-        }
 
-        // Определяем скорость (Shift = бег)
-        if (Input.GetKey(KeyCode.LeftShift))
-            currentSpeed = sprintSpeed;
-        else
-            currentSpeed = moveSpeed;
+        // Берём только горизонтальное направление взгляда.
+        Vector3 forward = playerCamera.transform.forward;
+        forward.y = 0f;
 
-        // Получаем ввод с клавиатуры
-        float x = Input.GetAxisRaw("Horizontal");
-        float z = Input.GetAxisRaw("Vertical");
+        if (forward.sqrMagnitude < 0.001f)
+            forward = transform.forward;
 
-        // Движение относительно камеры
-        Vector3 moveDirection = (playerCamera.transform.forward * z) + (playerCamera.transform.right * x);
-        moveDirection.y = 0;
-        moveDirection.Normalize();
+        forward.Normalize();
 
-        // Применяем скорость (velocity, а не linearVelocity!)
-        rb.velocity = new Vector3(
-            moveDirection.x * currentSpeed,
-            rb.velocity.y,  // сохраняем вертикальную скорость (гравитацию)
-            moveDirection.z * currentSpeed
-        );
+        // Горизонтальное направление вправо.
+        Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+
+        // Рассчитываем движение относительно камеры.
+        Vector3 moveDirection =
+            forward * moveInput.y +
+            right * moveInput.x;
+
+        // Не позволяем диагональному движению быть быстрее.
+        moveDirection = Vector3.ClampMagnitude(moveDirection, 1f);
+
+        // Меняем только горизонтальную скорость.
+        // Вертикальная скорость сохраняется для гравитации.
+        Vector3 velocity = rb.velocity;
+
+        velocity.x = moveDirection.x * currentSpeed;
+        velocity.z = moveDirection.z * currentSpeed;
+
+        rb.velocity = velocity;
     }
 }

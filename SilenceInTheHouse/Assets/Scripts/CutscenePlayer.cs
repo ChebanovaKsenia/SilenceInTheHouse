@@ -1,6 +1,8 @@
+
 using UnityEngine;
 using UnityEngine.Video;
 using UnityEngine.UI;
+using System.Collections;
 
 public class CutscenePlayer : MonoBehaviour
 {
@@ -17,17 +19,55 @@ public class CutscenePlayer : MonoBehaviour
     public Transform playerSpawnPoint;
     public GameObject player;
 
+    private PlayerControllerFPS playerController;
+    private MonsterAI monster;
     private bool isPlaying = false;
+    private bool cutsceneEnded = false;
 
     void Start()
     {
-        if (cutsceneCanvas != null) cutsceneCanvas.SetActive(false);
-        if (player != null) player.SetActive(false);
+        if (player != null)
+        {
+            // Не отключаем игрока целиком:
+            // иначе отключится и его камера.
+            playerController = player.GetComponent<PlayerControllerFPS>();
+
+            if (playerController != null)
+                playerController.enabled = false;
+        }
+        else
+        {
+            Debug.LogError("CutscenePlayer: не назначен Player!");
+        }
+
+        monster = FindObjectOfType<MonsterAI>();
+
+        // На время вступления останавливаем монстра.
+        if (monster != null)
+        {
+            if (monster.Agent != null)
+                monster.Agent.isStopped = true;
+
+            monster.gameObject.SetActive(false);
+        }
+
+        if (cutsceneCanvas != null)
+            cutsceneCanvas.SetActive(false);
+
+        if (cutsceneScreen != null)
+            cutsceneScreen.gameObject.SetActive(false);
+
+        if (videoPlayer == null)
+            Debug.LogError("CutscenePlayer: не назначен VideoPlayer!");
+        else if (videoPlayer.clip == null)
+            Debug.LogError("CutscenePlayer: в VideoPlayer не назначен видеоклип!");
 
         if (fadeOverlay != null)
         {
             fadeOverlay.SetActive(true);
+
             Image fadeImage = fadeOverlay.GetComponent<Image>();
+
             if (fadeImage != null)
             {
                 Color color = fadeImage.color;
@@ -39,25 +79,36 @@ public class CutscenePlayer : MonoBehaviour
 
     public void PlayCutscene()
     {
-        if (isPlaying) return;
-        isPlaying = true;
+        if (isPlaying)
+            return;
 
-        Debug.Log("ЗАПУСК КАТ-СЦЕНЫ!");
+        if (videoPlayer == null || videoPlayer.clip == null)
+        {
+            Debug.LogError("CutscenePlayer: невозможно запустить видео. Проверь VideoPlayer и Clip.");
+            return;
+        }
+
+        isPlaying = true;
+        cutsceneEnded = false;
+
+        Debug.Log("Вступительная кат-сцена запускается!");
 
         if (fadeOverlay != null)
-        {
             StartCoroutine(FadeOutBeforeCutscene());
-        }
         else
-        {
             StartCutsceneImmediately();
-        }
     }
 
-    System.Collections.IEnumerator FadeOutBeforeCutscene()
+    IEnumerator FadeOutBeforeCutscene()
     {
         Image fadeImage = fadeOverlay.GetComponent<Image>();
-        if (fadeImage == null) yield break;
+
+        if (fadeImage == null)
+        {
+            Debug.LogWarning("CutscenePlayer: на FadeOverlay нет компонента Image.");
+            StartCutsceneImmediately();
+            yield break;
+        }
 
         float elapsed = 0f;
         Color color = fadeImage.color;
@@ -81,49 +132,79 @@ public class CutscenePlayer : MonoBehaviour
 
     void StartCutsceneImmediately()
     {
-        // Останавливаем музыку меню
         if (AudioManager.Instance != null)
-        {
             AudioManager.Instance.StopMenuMusic();
-        }
 
-        if (cutsceneCanvas != null) cutsceneCanvas.SetActive(true);
-        if (cutsceneScreen != null) cutsceneScreen.gameObject.SetActive(true);
+        if (cutsceneCanvas != null)
+            cutsceneCanvas.SetActive(true);
 
-        if (videoPlayer != null)
+        if (cutsceneScreen != null)
+            cutsceneScreen.gameObject.SetActive(true);
+
+        videoPlayer.Stop();
+        videoPlayer.isLooping = false;
+        videoPlayer.Play();
+
+        Debug.Log("Видеоплеер запущен.");
+
+        StartCoroutine(WaitForVideoEnd());
+    }
+
+    IEnumerator WaitForVideoEnd()
+    {
+        // Ждём завершения видеоклипа.
+        double duration = videoPlayer.clip.length;
+
+        if (duration <= 0)
         {
-            videoPlayer.Play();
+            Debug.LogError("CutscenePlayer: длительность видео равна нулю.");
+            yield break;
         }
 
-        Invoke(nameof(EndCutscene), (float)videoPlayer.clip.length);
+        yield return new WaitForSecondsRealtime((float)duration);
+
+        EndCutscene();
     }
 
     void EndCutscene()
     {
+        if (cutsceneEnded)
+            return;
+
+        cutsceneEnded = true;
+
         Debug.Log("Кат-сцена окончена. Игрок просыпается!");
 
-        if (cutsceneCanvas != null) cutsceneCanvas.SetActive(false);
+        if (videoPlayer != null)
+            videoPlayer.Stop();
+
+        if (cutsceneCanvas != null)
+            cutsceneCanvas.SetActive(false);
+
+        if (cutsceneScreen != null)
+            cutsceneScreen.gameObject.SetActive(false);
 
         if (player != null)
         {
-            player.SetActive(true);
+            player.transform.position = playerSpawnPoint != null
+                ? playerSpawnPoint.position
+                : player.transform.position;
+
             if (playerSpawnPoint != null)
-            {
-                player.transform.position = playerSpawnPoint.position;
                 player.transform.rotation = playerSpawnPoint.rotation;
-            }
         }
 
-        PlayerControllerFPS playerController = player.GetComponent<PlayerControllerFPS>();
         if (playerController != null)
-        {
             playerController.enabled = true;
-        }
 
-        MonsterAI monster = FindObjectOfType<MonsterAI>();
         if (monster != null)
         {
             monster.gameObject.SetActive(true);
+
+            if (monster.Agent != null)
+                monster.Agent.isStopped = false;
         }
+
+        Debug.Log("Вступление завершено. Управление игроком включено.");
     }
 }

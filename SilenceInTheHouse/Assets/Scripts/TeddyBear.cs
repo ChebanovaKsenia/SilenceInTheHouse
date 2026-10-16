@@ -10,6 +10,7 @@ public class TeddyBear : MonoBehaviour
 
     [Header("Состояние")]
     public bool isPickedUp = false;
+    public float lastPickupTime = -10f;
 
     private GameObject player;
     private Collider bearCollider;
@@ -40,6 +41,7 @@ public class TeddyBear : MonoBehaviour
     public void PickUp()
     {
         isPickedUp = true;
+        lastPickupTime = Time.time;
         Debug.Log(">>> МИШКА ПОДОБРАНА. ПРИКРЕПЛЕНИЕ К ИГРОКУ.");
 
         // 1. Прикрепляем к игроку

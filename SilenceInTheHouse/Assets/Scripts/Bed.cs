@@ -1,10 +1,15 @@
+
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections;
 
 public class Bed : MonoBehaviour
 {
     [Header("Настройки")]
-    public float interactionDistance = 3f;
+    public float interactionDistance = 1.8f;
+
+    [Header("Точка взаимодействия")]
+    public Transform interactionPoint;
 
     [Header("Ссылки")]
     public TeddyBear teddyBear;
@@ -19,86 +24,126 @@ public class Bed : MonoBehaviour
     void Start()
     {
         player = GameObject.FindGameObjectWithTag("Player");
+
         if (player != null)
-        {
             playerController = player.GetComponent<PlayerControllerFPS>();
-        }
+        else
+            Debug.LogError("Bed: игрок с тегом Player не найден!");
 
-        if (teddyBear == null) Debug.LogError("ОШИБКА: Не назначен TeddyBear в кровати!");
-        if (levelCompleteVideo == null) Debug.LogError("ОШИБКА: Не назначен LevelCompleteVideo в кровати!");
+        if (interactionPoint == null)
+            Debug.LogError("Bed: НЕ назначен BedInteractionPoint!");
 
-        if (fadeOverlay != null) fadeOverlay.SetActive(false);
+        if (teddyBear == null)
+            Debug.LogError("Bed: не назначен TeddyBear!");
+
+        if (levelCompleteVideo == null)
+            Debug.LogError("Bed: не назначен LevelCompleteVideo!");
+
+        if (fadeOverlay != null)
+            fadeOverlay.SetActive(false);
     }
 
     void Update()
     {
-        // Если уже спим или нет мишки/игрока, выходим
-        if (isSleeping || player == null || teddyBear == null) return;
+        if (isSleeping)
+            return;
 
-        // Проверяем нажатие E
-        if (Input.GetKeyDown(KeyCode.E))
+        // Русская А на английской раскладке — физическая клавиша F.
+        if (!Input.GetKeyDown(KeyCode.F))
+            return;
+
+        Debug.Log("Bed: нажата клавиша F.");
+
+        // При любой ошибке ссылок взаимодействие запрещено.
+        if (player == null || interactionPoint == null || teddyBear == null)
         {
-            float distance = Vector3.Distance(transform.position, player.transform.position);
-
-            if (distance < interactionDistance)
-            {
-                if (teddyBear.isPickedUp)
-                {
-                    Debug.Log(">>> ИГРОК НАЖАЛ E У КРОВАТИ С МИШКОЙ. ЗАПУСК ПОБЕДЫ!");
-                    SleepWithTeddy();
-                }
-                else
-                {
-                    Debug.Log(">>> ИГРОК НАЖАЛ E У КРОВАТИ, НО МИШКА НЕ ПОДОБРАНА!");
-                }
-            }
+            Debug.LogError(
+                "Bed: взаимодействие невозможно. Проверь ссылки в Inspector."
+            );
+            return;
         }
+
+        // Проверяем полное расстояние: X, Y и Z.
+        float distance = Vector3.Distance(
+            player.transform.position,
+            interactionPoint.position
+        );
+
+        Debug.Log(
+            "Bed: расстояние до точки кровати = " +
+            distance.ToString("F2") + " м."
+        );
+
+        // Нельзя активировать кровать с другого этажа.
+        if (distance > interactionDistance)
+        {
+            Debug.Log("Bed: слишком далеко от кровати!");
+            return;
+        }
+
+        // Мишка должна быть подобрана.
+        if (!teddyBear.isPickedUp)
+        {
+            Debug.Log("Bed: сначала подберите мишку!");
+            return;
+        }
+
+        // Не разрешаем мгновенно использовать кровать после подбора.
+        if (Time.time - teddyBear.lastPickupTime < 1f)
+        {
+            Debug.Log("Bed: подождите и подойдите к кровати.");
+            return;
+        }
+
+        SleepWithTeddy();
     }
 
     void SleepWithTeddy()
     {
-        isSleeping = true;
-        Debug.Log(">>> НАЧАЛО ПРОЦЕДУРЫ ПОБЕДЫ (SleepWithTeddy)");
+        if (isSleeping)
+            return;
 
-        // 1. Останавливаем монстра навсегда
+        isSleeping = true;
+
+        Debug.Log("Bed: игрок рядом с кроватью и имеет мишку.");
+
         if (monster != null)
         {
             monster.playerHasWon = true;
-            if (monster.Agent != null) monster.Agent.isStopped = true;
-            Debug.Log(">>> МОНСТР ОСТАНОВЛЕН.");
+
+            if (monster.Agent != null)
+                monster.Agent.isStopped = true;
         }
 
-        // 2. Блокируем управление игроком
         if (playerController != null)
-        {
             playerController.enabled = false;
-            Debug.Log(">>> УПРАВЛЕНИЕ ИГРОКОМ ОТКЛЮЧЕНО.");
-        }
 
-        // 3. Кладем мишку на кровать
         teddyBear.Drop();
         teddyBear.transform.SetParent(transform);
-        teddyBear.transform.localPosition = new Vector3(0, 0.5f, 0);
-        teddyBear.transform.localRotation = Quaternion.Euler(0, 0, 90);
+        teddyBear.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+        teddyBear.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
 
-        // 4. Затемнение экрана
         if (fadeOverlay != null)
         {
             fadeOverlay.SetActive(true);
             StartCoroutine(FadeToBlack());
         }
 
-        // 5. Запуск видео победы через 1.5 секунды (время затемнения)
         Invoke(nameof(ShowLevelCompleteVideo), 1.5f);
     }
 
-    System.Collections.IEnumerator FadeToBlack()
+    IEnumerator FadeToBlack()
     {
         float duration = 1.5f;
         float elapsed = 0f;
+
         Image fadeImage = fadeOverlay.GetComponent<Image>();
 
-        if (fadeImage == null) yield break;
+        if (fadeImage == null)
+        {
+            Debug.LogWarning("Bed: на FadeOverlay отсутствует компонент Image.");
+            yield break;
+        }
 
         Color color = fadeImage.color;
         color.a = 0f;
@@ -111,15 +156,22 @@ public class Bed : MonoBehaviour
             fadeImage.color = color;
             yield return null;
         }
+
+        color.a = 1f;
+        fadeImage.color = color;
     }
 
     void ShowLevelCompleteVideo()
     {
-        Debug.Log(">>> ВЫЗОВ LevelCompleteVideo.PlayVideo()");
-        if (levelCompleteVideo != null)
+        if (levelCompleteVideo == null)
         {
-            levelCompleteVideo.gameObject.SetActive(true);
-            levelCompleteVideo.PlayVideo();
+            Debug.LogError("Bed: не назначен LevelCompleteVideo!");
+            return;
         }
+
+        Debug.Log("Bed: запускаем видео концовки.");
+
+        levelCompleteVideo.gameObject.SetActive(true);
+        levelCompleteVideo.PlayVideo();
     }
 }
