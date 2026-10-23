@@ -1,168 +1,255 @@
+
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
+using System;
 
 public class SettingsMenu : MonoBehaviour
 {
-    [Header("Панели")]
+    [Header("Панель настроек")]
     public GameObject settingsPanel;
-    public GameObject mainMenuButtons;
+
+    [Header("Громкость")]
+    public Slider volumeSlider;
+    public TMP_Text volumePercentText;
 
     [Header("Выпадающие списки")]
-    public SmartDropdown resolutionDropdown;  // Ссылка на скрипт выпадающего списка разрешения
-    public SmartDropdown screenModeDropdown;  // Ссылка на скрипт выпадающего списка режима экрана
+    public SmartDropdown resolutionDropdown;
+    public SmartDropdown screenModeDropdown;
 
-    [Header("Громкость музыки")]
-    public Slider musicSlider;
+    [Header("Настройки по умолчанию")]
+    public int defaultResolutionWidth = 1920;
+    public int defaultResolutionHeight = 1080;
 
-    [Header("Громкость звуков (SFX)")]
-    public Slider sfxSlider;
+    [Range(0f, 1f)]
+    public float defaultVolume = 0.5f;
 
-    [Header("Кнопки управления")]
-    public Button saveButton;
-    public Button resetButton;
-    public Button backButton;
+    public FullScreenMode defaultScreenMode =
+        FullScreenMode.FullScreenWindow;
 
-    private int selectedWidth = 1920;
-    private int selectedHeight = 1080;
-    private FullScreenMode selectedMode = FullScreenMode.Windowed;
+    private int resolutionWidth;
+    private int resolutionHeight;
+    private FullScreenMode screenMode;
+    private float volume;
 
-    void Start()
+    private const string ResolutionWidthKey = "Settings_ResolutionWidth";
+    private const string ResolutionHeightKey = "Settings_ResolutionHeight";
+    private const string ScreenModeKey = "Settings_ScreenMode";
+    private const string VolumeKey = "Settings_Volume";
+
+    private void Awake()
     {
-        if (saveButton != null) saveButton.onClick.AddListener(SaveSettings);
-        if (resetButton != null) resetButton.onClick.AddListener(ResetSettings);
-        if (backButton != null) backButton.onClick.AddListener(GoBack);
+        if (settingsPanel == null)
+            settingsPanel = gameObject;
 
         LoadSettings();
+
+        if (volumeSlider != null)
+        {
+            volumeSlider.minValue = 0f;
+            volumeSlider.maxValue = 1f;
+
+            volumeSlider.SetValueWithoutNotify(volume);
+
+            volumeSlider.onValueChanged.RemoveListener(OnVolumeChanged);
+            volumeSlider.onValueChanged.AddListener(OnVolumeChanged);
+        }
+
+        ApplyVolume();
+        UpdateVolumeText();
+        ApplyDisplaySettings();
+        RefreshDropdownDisplays();
+
+        Debug.Log("Настройки загружены.");
     }
 
+    private void OnEnable()
+    {
+        RefreshDropdownDisplays();
+    }
+
+    private void OnDestroy()
+    {
+        if (volumeSlider != null)
+            volumeSlider.onValueChanged.RemoveListener(OnVolumeChanged);
+    }
+
+    private void LoadSettings()
+    {
+        resolutionWidth = PlayerPrefs.GetInt(
+            ResolutionWidthKey,
+            defaultResolutionWidth
+        );
+
+        resolutionHeight = PlayerPrefs.GetInt(
+            ResolutionHeightKey,
+            defaultResolutionHeight
+        );
+
+        int savedMode = PlayerPrefs.GetInt(
+            ScreenModeKey,
+            (int)defaultScreenMode
+        );
+
+        if (Enum.IsDefined(typeof(FullScreenMode), savedMode))
+            screenMode = (FullScreenMode)savedMode;
+        else
+            screenMode = defaultScreenMode;
+
+        volume = Mathf.Clamp01(
+            PlayerPrefs.GetFloat(VolumeKey, defaultVolume)
+        );
+    }
+
+    // Открытие настроек
     public void OpenSettings()
     {
-        settingsPanel.SetActive(true);
-        if (mainMenuButtons != null) mainMenuButtons.SetActive(false);
+        if (settingsPanel != null)
+            settingsPanel.SetActive(true);
 
-        // Обновляем отображение текущих настроек
-        UpdateDropdownsDisplay();
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
+        RefreshDropdownDisplays();
+
+        Debug.Log("Открыты настройки.");
     }
 
+    // Закрытие настроек
     public void CloseSettings()
     {
-        settingsPanel.SetActive(false);
-        if (mainMenuButtons != null) mainMenuButtons.SetActive(true);
+        SaveSettings();
+
+        if (settingsPanel != null)
+            settingsPanel.SetActive(false);
+
+        Debug.Log("Настройки закрыты.");
     }
 
-    void SaveSettings()
+    // Выбор разрешения через SmartDropdown
+    public void OnResolutionSelected(int width, int height)
     {
-        PlayerPrefs.SetInt("ScreenWidth", selectedWidth);
-        PlayerPrefs.SetInt("ScreenHeight", selectedHeight);
-        PlayerPrefs.SetInt("ScreenMode", (int)selectedMode);
-
-        if (musicSlider != null) PlayerPrefs.SetFloat("MusicVolume", musicSlider.value);
-        if (sfxSlider != null) PlayerPrefs.SetFloat("SFXVolume", sfxSlider.value);
-
-        PlayerPrefs.Save();
-
-        // Применяем настройки
-        ApplySettings();
-
-        Debug.Log("Настройки сохранены!");
-    }
-
-    void ApplySettings()
-    {
-        // Применяем разрешение и режим экрана
-        Screen.SetResolution(selectedWidth, selectedHeight, selectedMode);
-
-        // Применяем громкость
-        if (AudioManager.Instance != null)
+        if (width <= 0 || height <= 0)
         {
-            if (musicSlider != null) AudioManager.Instance.SetMusicVolume(musicSlider.value);
-            if (sfxSlider != null) AudioManager.Instance.SetSFXVolume(sfxSlider.value);
+            Debug.LogWarning("Некорректное разрешение.");
+            return;
+        }
+
+        resolutionWidth = width;
+        resolutionHeight = height;
+
+        ApplyDisplaySettings();
+
+        Debug.Log($"Выбрано разрешение: {width}x{height}");
+    }
+
+    // Выбор режима экрана через SmartDropdown
+    public void OnScreenModeSelected(FullScreenMode mode)
+    {
+        screenMode = mode;
+
+        ApplyDisplaySettings();
+
+        Debug.Log($"Выбран режим экрана: {mode}");
+    }
+
+    // Применение разрешения и режима экрана
+    private void ApplyDisplaySettings()
+    {
+        Screen.SetResolution(
+            resolutionWidth,
+            resolutionHeight,
+            screenMode
+        );
+    }
+
+    // Изменение громкости
+    private void OnVolumeChanged(float value)
+    {
+        volume = Mathf.Clamp01(value);
+
+        ApplyVolume();
+        UpdateVolumeText();
+    }
+
+    private void ApplyVolume()
+    {
+        AudioListener.volume = volume;
+    }
+
+    // Обновление текста процентов в реальном времени
+    private void UpdateVolumeText()
+    {
+        if (volumePercentText != null)
+        {
+            int percent = Mathf.RoundToInt(volume * 100f);
+            volumePercentText.text = percent + "%";
         }
     }
 
-    void ResetSettings()
+    // Обновление отображения выбранных вариантов
+    public void RefreshDropdownDisplays()
     {
-        if (musicSlider != null) musicSlider.value = 0.5f;
-        if (sfxSlider != null) sfxSlider.value = 0.5f;
-
-        selectedWidth = 1920;
-        selectedHeight = 1080;
-        selectedMode = FullScreenMode.Windowed;
-
-        ApplySettings();
-        UpdateDropdownsDisplay();
-
-        Debug.Log("Настройки сброшены!");
-    }
-
-    void GoBack() => CloseSettings();
-
-    void LoadSettings()
-    {
-        // Загружаем сохранённые настройки
-        selectedWidth = PlayerPrefs.GetInt("ScreenWidth", Screen.currentResolution.width);
-        selectedHeight = PlayerPrefs.GetInt("ScreenHeight", Screen.currentResolution.height);
-        selectedMode = (FullScreenMode)PlayerPrefs.GetInt("ScreenMode", (int)Screen.fullScreenMode);
-
-        float savedMusicVolume = PlayerPrefs.GetFloat("MusicVolume", 0.5f);
-        float savedSFXVolume = PlayerPrefs.GetFloat("SFXVolume", 0.5f);
-
-        if (musicSlider != null) musicSlider.value = savedMusicVolume;
-        if (sfxSlider != null) sfxSlider.value = savedSFXVolume;
-
-        if (AudioManager.Instance != null)
-        {
-            AudioManager.Instance.SetMusicVolume(savedMusicVolume);
-            AudioManager.Instance.SetSFXVolume(savedSFXVolume);
-        }
-
-        // Обновляем отображение
-        UpdateDropdownsDisplay();
-    }
-
-    void UpdateDropdownsDisplay()
-    {
-        // Обновляем текст на кнопках выпадающих списков
         if (resolutionDropdown != null)
         {
-            string resolutionText = selectedWidth + " x " + selectedHeight;
-            Debug.Log("Обновляем разрешение: " + resolutionText);
-            // Здесь нужно вызвать метод SmartDropdown для обновления текста
-            // Но так как у нас спрайты, нужно найти соответствующий спрайт
+            resolutionDropdown.SetResolutionDisplay(
+                resolutionWidth,
+                resolutionHeight
+            );
         }
 
         if (screenModeDropdown != null)
         {
-            string modeText = GetScreenModeText(selectedMode);
-            Debug.Log("Обновляем режим экрана: " + modeText);
+            screenModeDropdown.SetScreenModeDisplay(screenMode);
         }
     }
 
-    string GetScreenModeText(FullScreenMode mode)
+    // Сохранение настроек
+    public void SaveSettings()
     {
-        switch (mode)
-        {
-            case FullScreenMode.FullScreenWindow:
-                return "Полноэкранный";
-            case FullScreenMode.MaximizedWindow:
-                return "Окно без рамки";
-            case FullScreenMode.Windowed:
-            default:
-                return "Оконный";
-        }
+        PlayerPrefs.SetInt(
+            ResolutionWidthKey,
+            resolutionWidth
+        );
+
+        PlayerPrefs.SetInt(
+            ResolutionHeightKey,
+            resolutionHeight
+        );
+
+        PlayerPrefs.SetInt(
+            ScreenModeKey,
+            (int)screenMode
+        );
+
+        PlayerPrefs.SetFloat(
+            VolumeKey,
+            volume
+        );
+
+        PlayerPrefs.Save();
+
+        Debug.Log("Настройки сохранены.");
     }
 
-    // Методы для вызова из SmartDropdown при выборе варианта
-    public void OnResolutionSelected(int width, int height)
+    // Сброс настроек
+    public void ResetSettings()
     {
-        selectedWidth = width;
-        selectedHeight = height;
-        Debug.Log("Выбрано разрешение: " + width + "x" + height);
-    }
+        resolutionWidth = defaultResolutionWidth;
+        resolutionHeight = defaultResolutionHeight;
+        screenMode = defaultScreenMode;
+        volume = defaultVolume;
 
-    public void OnScreenModeSelected(FullScreenMode mode)
-    {
-        selectedMode = mode;
-        Debug.Log("Выбран режим экрана: " + mode);
+        if (volumeSlider != null)
+            volumeSlider.SetValueWithoutNotify(volume);
+
+        ApplyVolume();
+        UpdateVolumeText();
+        ApplyDisplaySettings();
+        RefreshDropdownDisplays();
+
+        SaveSettings();
+
+        Debug.Log("Настройки сброшены до значений по умолчанию.");
     }
 }

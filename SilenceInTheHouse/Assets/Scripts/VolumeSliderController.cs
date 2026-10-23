@@ -1,11 +1,9 @@
+
 using UnityEngine;
 using UnityEngine.UI;
 
 public class VolumeSliderController : MonoBehaviour
 {
-    public Slider slider;
-
-    [Header("Спрайты для смены при наведении")]
     public Sprite bgInactive;
     public Sprite bgActive;
     public Sprite fillInactive;
@@ -17,65 +15,43 @@ public class VolumeSliderController : MonoBehaviour
     private Image fillImage;
     private Image handleImage;
 
-    void Start()
+    private void Awake()
     {
-        // Находим компоненты слайдера
         Transform bgTransform = transform.Find("Background");
         Transform fillTransform = transform.Find("Fill Area/Fill");
         Transform handleTransform = transform.Find("Handle Slide Area/Handle");
 
-        if (bgTransform != null) bgImage = bgTransform.GetComponent<Image>();
-        if (fillTransform != null) fillImage = fillTransform.GetComponent<Image>();
-        if (handleTransform != null) handleImage = handleTransform.GetComponent<Image>();
+        if (bgTransform != null)
+            bgImage = bgTransform.GetComponent<Image>();
 
-        // Проверяем слайдер
-        if (slider == null)
-        {
-            slider = GetComponent<Slider>();
-        }
+        if (fillTransform != null)
+            fillImage = fillTransform.GetComponent<Image>();
 
-        if (slider != null)
-        {
-            // Удаляем старые слушатели, чтобы не дублировались
-            slider.onValueChanged.RemoveAllListeners();
-
-            // Подписываемся на изменение
-            slider.onValueChanged.AddListener(OnVolumeChanged);
-
-            // Сразу применяем текущее значение
-            OnVolumeChanged(slider.value);
-        }
-        else
-        {
-            Debug.LogError("VolumeSliderController: Slider не найден!");
-        }
-    }
-
-    void OnVolumeChanged(float value)
-    {
-        // Применяем громкость напрямую через AudioManager
-        if (AudioManager.Instance != null)
-        {
-            AudioManager.Instance.SetSFXVolume(value);
-        }
-        else
-        {
-            // Запасной вариант, если AudioManager нет
-            AudioListener.volume = value;
-        }
+        if (handleTransform != null)
+            handleImage = handleTransform.GetComponent<Image>();
     }
 
     public void OnHoverEnter()
     {
-        if (bgImage && bgActive) bgImage.sprite = bgActive;
-        if (fillImage && fillActive) fillImage.sprite = fillActive;
-        if (handleImage && handleActive) handleImage.sprite = handleActive;
+        if (bgImage != null && bgActive != null)
+            bgImage.sprite = bgActive;
+
+        if (fillImage != null && fillActive != null)
+            fillImage.sprite = fillActive;
+
+        if (handleImage != null && handleActive != null)
+            handleImage.sprite = handleActive;
     }
 
     public void OnHoverExit()
     {
-        if (bgImage && bgInactive) bgImage.sprite = bgInactive;
-        if (fillImage && fillInactive) fillImage.sprite = fillInactive;
-        if (handleImage && handleNormal) handleImage.sprite = handleNormal;
+        if (bgImage != null && bgInactive != null)
+            bgImage.sprite = bgInactive;
+
+        if (fillImage != null && fillInactive != null)
+            fillImage.sprite = fillInactive;
+
+        if (handleImage != null && handleNormal != null)
+            handleImage.sprite = handleNormal;
     }
 }
