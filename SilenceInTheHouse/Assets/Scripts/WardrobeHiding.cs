@@ -16,32 +16,34 @@ public class WardrobeHiding : MonoBehaviour
     [Header("Монстр")]
     public MonsterAI monsterAI;
 
-    [Header("Точки шкафа")]
+    [Header("Точки укрытия")]
     public Transform hidePoint;
     public Transform peekPoint;
     public Transform exitPoint;
 
-    [Tooltip("Точка на NavMesh перед шкафом, куда идёт монстр. " +
-             "Если не задана, используется корень шкафа.")]
+    [Tooltip("Точка на NavMesh перед укрытием, куда идёт монстр.")]
     public Transform monsterCheckPoint;
 
     [Header("Взаимодействие")]
     public KeyCode interactKey = KeyCode.E;
     public float interactionDistance = 2f;
+
+    [Tooltip("Необязательная точка для проверки расстояния до укрытия. Если пусто, используется позиция объекта со скриптом.")]
+    public Transform interactionPoint;
+
+    [Tooltip("Общий UI TextMeshPro. Можно назначить один и тот же текст всем укрытиям.")]
     public TMP_Text interactionText;
 
     [Header("Перемещение")]
     [Min(0.05f)] public float enterDuration = 0.7f;
     [Min(0.05f)] public float exitDuration = 0.7f;
 
-    [Header("Камера внутри шкафа")]
+    [Header("Камера внутри укрытия")]
     public float hiddenMouseSensitivity = 2f;
 
-    [Tooltip("Максимальный поворот влево и вправо относительно щели.")]
     [Range(5f, 80f)]
     public float maxPeekYaw = 35f;
 
-    [Tooltip("Максимальный поворот вверх и вниз относительно щели.")]
     [Range(5f, 60f)]
     public float maxPeekPitch = 25f;
 
@@ -49,9 +51,14 @@ public class WardrobeHiding : MonoBehaviour
     [Tooltip("Назначь только визуальную модель игрока, не корневой объект.")]
     public GameObject playerVisual;
 
+    // Единственное укрытие, которым игрок сейчас занят.
+    private static WardrobeHiding activeHiding;
+
+    // Единственная подсказка для всех укрытий.
+    private static TMP_Text sharedText;
+
     private bool isPlayerInside;
     private bool isTransitioning;
-
     private Coroutine transitionCoroutine;
 
     private Transform originalCameraParent;
@@ -61,9 +68,6 @@ public class WardrobeHiding : MonoBehaviour
     private bool originalColliderEnabled;
     private bool originalRigidbodyKinematic;
     private bool originalRigidbodyUseGravity;
-
-    private bool originalCursorVisible;
-    private CursorLockMode originalCursorLockMode;
 
     private Quaternion peekBaseLocalRotation;
     private float peekYaw;
@@ -85,53 +89,63 @@ public class WardrobeHiding : MonoBehaviour
         originalRigidbodyKinematic = playerRigidbody.isKinematic;
         originalRigidbodyUseGravity = playerRigidbody.useGravity;
 
-        originalCursorVisible = Cursor.visible;
-        originalCursorLockMode = Cursor.lockState;
-
+        // Не выключаем общий текст здесь:
+        // другие экземпляры этого скрипта используют его тоже.
         if (interactionText != null)
-            interactionText.gameObject.SetActive(false);
+        {
+            sharedText = interactionText;
+        }
     }
 
     private void Update()
     {
-        if (isPlayerInside)
+        // Пока игрок занят конкретным укрытием,
+        // остальные укрытия не меняют текст и управление.
+        if (activeHiding != null)
         {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-        }
-        if (player == null || isTransitioning)
-            return;
+            if (activeHiding != this)
+                return;
 
-        if (isPlayerInside)
+            if (isTransitioning)
+            {
+                HidePrompt();
+                return;
+            }
+
+            if (isPlayerInside)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+
+                SetPrompt("E — выйти");
+                HandleHiddenCamera();
+
+                if (Input.GetKeyDown(interactKey))
+                    BeginExit();
+
+                return;
+            }
+        }
+
+        // Если игрок ни в одном укрытии не находится,
+        // подсказкой управляет ближайшее доступное укрытие.
+        WardrobeHiding nearest = FindNearestHidingPlace();
+
+        if (nearest == this)
         {
-            SetPrompt("E — выйти");
-            HandleHiddenCamera();
+            SetPrompt("E — спрятаться");
 
             if (Input.GetKeyDown(interactKey))
-                BeginExit();
-
-            return;
+                BeginEnter();
         }
-
-        bool playerIsNear = IsPlayerNearWardrobe();
-
-        if (interactionText != null)
+        else if (nearest == null)
         {
-            interactionText.gameObject.SetActive(playerIsNear);
-
-            if (playerIsNear)
-                interactionText.text = "E — спрятаться";
+            HidePrompt();
         }
-
-        if (playerIsNear && Input.GetKeyDown(interactKey))
-            BeginEnter();
-
     }
 
     private bool ValidateReferences()
     {
-        bool valid = true;
-
         if (player == null ||
             playerController == null ||
             firstPersonCamera == null ||
@@ -141,23 +155,83 @@ public class WardrobeHiding : MonoBehaviour
             hidePoint == null ||
             peekPoint == null ||
             exitPoint == null ||
-            monsterAI == null)
+            monsterAI == null ||
+            interactionText == null)
         {
             Debug.LogError(
                 "[WardrobeHiding] Не назначены обязательные ссылки в Inspector!",
                 this
             );
 
-            valid = false;
+            return false;
         }
 
-        return valid;
+        return true;
     }
 
-    private bool IsPlayerNearWardrobe()
+    private Vector3 GetInteractionPosition()
     {
-        return Vector3.Distance(player.position, transform.position)
-               <= interactionDistance;
+        return interactionPoint != null
+            ? interactionPoint.position
+            : transform.position;
+    }
+
+    private bool IsPlayerNear()
+    {
+        if (player == null)
+            return false;
+
+        return Vector3.Distance(
+            player.position,
+            GetInteractionPosition()
+        ) <= interactionDistance;
+    }
+
+    private WardrobeHiding FindNearestHidingPlace()
+    {
+        WardrobeHiding[] hidingPlaces =
+            FindObjectsOfType<WardrobeHiding>();
+
+        WardrobeHiding nearest = null;
+        float nearestDistance = float.MaxValue;
+
+        foreach (WardrobeHiding place in hidingPlaces)
+        {
+            if (place == null ||
+                !place.isActiveAndEnabled ||
+                place.isTransitioning ||
+                place.isPlayerInside ||
+                place.player == null ||
+                place.interactionText == null)
+            {
+                continue;
+            }
+
+            if (place.player != player)
+                continue;
+
+            if (place.monsterAI != null &&
+                place.monsterAI.playerHasWon)
+            {
+                continue;
+            }
+
+            if (!place.IsPlayerNear())
+                continue;
+
+            float distance = Vector3.Distance(
+                player.position,
+                place.GetInteractionPosition()
+            );
+
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = place;
+            }
+        }
+
+        return nearest;
     }
 
     private void BeginEnter()
@@ -165,28 +239,27 @@ public class WardrobeHiding : MonoBehaviour
         if (isPlayerInside || isTransitioning)
             return;
 
+        if (activeHiding != null)
+            return;
+
         if (monsterAI != null && monsterAI.playerHasWon)
             return;
 
-        // Сначала немедленно сообщаем монстру, что игрок начал прятаться.
-        // Это происходит ДО перемещения и до отключения коллайдера.
+        activeHiding = this;
+
         Transform checkPoint = monsterCheckPoint != null
             ? monsterCheckPoint
             : transform;
 
         monsterAI.OnPlayerHide(checkPoint);
 
-        originalCursorVisible = Cursor.visible;
-        originalCursorLockMode = Cursor.lockState;
-
         isTransitioning = true;
-        transitionCoroutine = StartCoroutine(EnterWardrobeRoutine());
+        transitionCoroutine = StartCoroutine(EnterRoutine());
     }
 
-    private IEnumerator EnterWardrobeRoutine()
+    private IEnumerator EnterRoutine()
     {
-        if (interactionText != null)
-            interactionText.gameObject.SetActive(false);
+        HidePrompt();
 
         playerController.enabled = false;
         firstPersonCamera.enabled = false;
@@ -195,15 +268,17 @@ public class WardrobeHiding : MonoBehaviour
         playerRigidbody.angularVelocity = Vector3.zero;
         playerRigidbody.isKinematic = true;
         playerRigidbody.useGravity = false;
-
         playerCollider.enabled = false;
 
         Vector3 startPosition = player.position;
         Quaternion startRotation = player.rotation;
 
         Vector3 targetPosition = hidePoint.position;
-        Quaternion targetRotation =
-            Quaternion.Euler(0f, hidePoint.eulerAngles.y, 0f);
+        Quaternion targetRotation = Quaternion.Euler(
+            0f,
+            hidePoint.eulerAngles.y,
+            0f
+        );
 
         float elapsed = 0f;
 
@@ -214,11 +289,17 @@ public class WardrobeHiding : MonoBehaviour
             float t = Mathf.Clamp01(elapsed / enterDuration);
             t = Mathf.SmoothStep(0f, 1f, t);
 
-            player.position =
-                Vector3.Lerp(startPosition, targetPosition, t);
+            player.position = Vector3.Lerp(
+                startPosition,
+                targetPosition,
+                t
+            );
 
-            player.rotation =
-                Quaternion.Slerp(startRotation, targetRotation, t);
+            player.rotation = Quaternion.Slerp(
+                startRotation,
+                targetRotation,
+                t
+            );
 
             yield return null;
         }
@@ -226,7 +307,6 @@ public class WardrobeHiding : MonoBehaviour
         player.position = targetPosition;
         player.rotation = targetRotation;
 
-        // Перемещаем камеру к щели шкафа.
         playerCamera.transform.SetParent(peekPoint, false);
         playerCamera.transform.localPosition = Vector3.zero;
         playerCamera.transform.localRotation = Quaternion.identity;
@@ -235,20 +315,22 @@ public class WardrobeHiding : MonoBehaviour
         peekYaw = 0f;
         peekPitch = 0f;
 
-        isPlayerInside = true;
-
         if (playerVisual != null)
             playerVisual.SetActive(false);
+
+        isPlayerInside = true;
+        isTransitioning = false;
+        transitionCoroutine = null;
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
-        isTransitioning = false;
-        transitionCoroutine = null;
-
         SetPrompt("E — выйти");
 
-        Debug.Log("[WardrobeHiding] Игрок спрятался в шкафу.");
+        Debug.Log(
+            "[WardrobeHiding] Игрок спрятался: " + gameObject.name,
+            this
+        );
     }
 
     private void HandleHiddenCamera()
@@ -256,14 +338,26 @@ public class WardrobeHiding : MonoBehaviour
         if (playerCamera == null)
             return;
 
-        float mouseX = Input.GetAxis("Mouse X") * hiddenMouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * hiddenMouseSensitivity;
+        float mouseX =
+            Input.GetAxis("Mouse X") * hiddenMouseSensitivity;
+
+        float mouseY =
+            Input.GetAxis("Mouse Y") * hiddenMouseSensitivity;
 
         peekYaw += mouseX;
         peekPitch -= mouseY;
 
-        peekYaw = Mathf.Clamp(peekYaw, -maxPeekYaw, maxPeekYaw);
-        peekPitch = Mathf.Clamp(peekPitch, -maxPeekPitch, maxPeekPitch);
+        peekYaw = Mathf.Clamp(
+            peekYaw,
+            -maxPeekYaw,
+            maxPeekYaw
+        );
+
+        peekPitch = Mathf.Clamp(
+            peekPitch,
+            -maxPeekPitch,
+            maxPeekPitch
+        );
 
         playerCamera.transform.localRotation =
             peekBaseLocalRotation *
@@ -276,25 +370,33 @@ public class WardrobeHiding : MonoBehaviour
             return;
 
         isTransitioning = true;
-        transitionCoroutine = StartCoroutine(ExitWardrobeRoutine());
+        transitionCoroutine = StartCoroutine(ExitRoutine());
     }
 
-    private IEnumerator ExitWardrobeRoutine()
+    private IEnumerator ExitRoutine()
     {
-        if (interactionText != null)
-            interactionText.gameObject.SetActive(false);
+        HidePrompt();
 
-        // Возвращаем камеру к её исходному родителю и трансформу.
-        playerCamera.transform.SetParent(originalCameraParent, false);
-        playerCamera.transform.localPosition = originalCameraLocalPosition;
-        playerCamera.transform.localRotation = originalCameraLocalRotation;
+        playerCamera.transform.SetParent(
+            originalCameraParent,
+            false
+        );
+
+        playerCamera.transform.localPosition =
+            originalCameraLocalPosition;
+
+        playerCamera.transform.localRotation =
+            originalCameraLocalRotation;
 
         Vector3 startPosition = player.position;
         Quaternion startRotation = player.rotation;
 
         Vector3 targetPosition = exitPoint.position;
-        Quaternion targetRotation =
-            Quaternion.Euler(0f, exitPoint.eulerAngles.y, 0f);
+        Quaternion targetRotation = Quaternion.Euler(
+            0f,
+            exitPoint.eulerAngles.y,
+            0f
+        );
 
         float elapsed = 0f;
 
@@ -305,11 +407,17 @@ public class WardrobeHiding : MonoBehaviour
             float t = Mathf.Clamp01(elapsed / exitDuration);
             t = Mathf.SmoothStep(0f, 1f, t);
 
-            player.position =
-                Vector3.Lerp(startPosition, targetPosition, t);
+            player.position = Vector3.Lerp(
+                startPosition,
+                targetPosition,
+                t
+            );
 
-            player.rotation =
-                Quaternion.Slerp(startRotation, targetRotation, t);
+            player.rotation = Quaternion.Slerp(
+                startRotation,
+                targetRotation,
+                t
+            );
 
             yield return null;
         }
@@ -334,23 +442,56 @@ public class WardrobeHiding : MonoBehaviour
         isTransitioning = false;
         transitionCoroutine = null;
 
-        // Проверяем монстра после перемещения игрока наружу.
-        // Если он рядом, MonsterAI сразу запускает смерть.
         monsterAI.OnPlayerExitWardrobe();
+
+        // Освобождаем общее управление.
+        activeHiding = null;
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
-        Debug.Log("[WardrobeHiding] Игрок вышел из шкафа.");
+        HidePrompt();
+
+        Debug.Log(
+            "[WardrobeHiding] Игрок вышел из укрытия: " + gameObject.name,
+            this
+        );
     }
 
     private void SetPrompt(string message)
     {
-        if (interactionText == null)
+        TMP_Text text = GetSharedText();
+
+        if (text == null)
             return;
 
-        interactionText.text = message;
-        interactionText.gameObject.SetActive(true);
+        text.text = message;
+
+        if (!text.gameObject.activeSelf)
+            text.gameObject.SetActive(true);
+    }
+
+    private void HidePrompt()
+    {
+        TMP_Text text = GetSharedText();
+
+        if (text != null && text.gameObject.activeSelf)
+            text.gameObject.SetActive(false);
+    }
+
+    private TMP_Text GetSharedText()
+    {
+        // Во время пряток приоритет у активного укрытия.
+        if (activeHiding != null &&
+            activeHiding.interactionText != null)
+        {
+            return activeHiding.interactionText;
+        }
+
+        if (interactionText != null)
+            sharedText = interactionText;
+
+        return sharedText;
     }
 
     private void OnDisable()
@@ -359,6 +500,12 @@ public class WardrobeHiding : MonoBehaviour
         {
             StopCoroutine(transitionCoroutine);
             transitionCoroutine = null;
+        }
+
+        if (activeHiding == this)
+        {
+            activeHiding = null;
+            HidePrompt();
         }
     }
 }
