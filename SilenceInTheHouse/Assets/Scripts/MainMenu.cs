@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
@@ -31,7 +30,7 @@ public class MainMenu : MonoBehaviour
     public float fadeDuration = 1.5f;
 
     [Header("Сцена игры")]
-    public string gameSceneName = "MainLevel";
+    public string gameSceneName = "LoadingScene"; // ИЗМЕНЕНО: было "MainLevel", теперь загружаем сцену загрузки
 
     private void Start()
     {

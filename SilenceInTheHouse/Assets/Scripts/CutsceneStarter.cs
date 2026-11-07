@@ -6,13 +6,12 @@ public class CutsceneStarter : MonoBehaviour
     public CutscenePlayer cutscenePlayer;
 
     [Header("Задержка перед запуском (секунды)")]
-    public float delay = 1f; // Ждем 1 секунду после загрузки сцены
+    public float delay = 0f; // ИЗМЕНЕНО: 0 секунд, запускаем мгновенно!
 
     void Start()
     {
         if (cutscenePlayer != null)
         {
-            // Ждем указанное время, затем запускаем кат-сцену
             Invoke(nameof(StartCutscene), delay);
         }
         else

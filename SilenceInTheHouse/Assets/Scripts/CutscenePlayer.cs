@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.Video;
 using UnityEngine.UI;
@@ -11,9 +10,9 @@ public class CutscenePlayer : MonoBehaviour
     public RawImage cutsceneScreen;
     public GameObject cutsceneCanvas;
 
-    [Header("Затемнение при загрузке")]
+    [Header("Чёрный экран (Затемнение)")]
     public GameObject fadeOverlay;
-    public float fadeOutDuration = 1f;
+    public float fadeOutDuration = 1.5f; // Длительность плавного появления игры после кат-сцены
 
     [Header("Что происходит после кат-сцены")]
     public Transform playerSpawnPoint;
@@ -26,52 +25,38 @@ public class CutscenePlayer : MonoBehaviour
 
     void Start()
     {
+        // 1. Блокируем игрока и монстра
         if (player != null)
         {
-            // Не отключаем игрока целиком:
-            // иначе отключится и его камера.
             playerController = player.GetComponent<PlayerControllerFPS>();
-
             if (playerController != null)
                 playerController.enabled = false;
         }
-        else
-        {
-            Debug.LogError("CutscenePlayer: не назначен Player!");
-        }
 
         monster = FindObjectOfType<MonsterAI>();
-
-        // На время вступления останавливаем монстра.
         if (monster != null)
         {
             if (monster.Agent != null)
                 monster.Agent.isStopped = true;
-
             monster.gameObject.SetActive(false);
         }
 
+        // 2. Готовим UI: видео-холст пока скрыт
         if (cutsceneCanvas != null)
             cutsceneCanvas.SetActive(false);
-
         if (cutsceneScreen != null)
             cutsceneScreen.gameObject.SetActive(false);
 
-        if (videoPlayer == null)
-            Debug.LogError("CutscenePlayer: не назначен VideoPlayer!");
-        else if (videoPlayer.clip == null)
-            Debug.LogError("CutscenePlayer: в VideoPlayer не назначен видеоклип!");
-
+        // 3. ВАЖНО: Чёрный экран ВКЛЮЧЕН и полностью непрозрачен с самого начала!
+        // Это гарантирует, что игрок НЕ увидит 3D-уровень при загрузке.
         if (fadeOverlay != null)
         {
             fadeOverlay.SetActive(true);
-
             Image fadeImage = fadeOverlay.GetComponent<Image>();
-
             if (fadeImage != null)
             {
                 Color color = fadeImage.color;
-                color.a = 1f;
+                color.a = 1f; // Полностью чёрный
                 fadeImage.color = color;
             }
         }
@@ -79,8 +64,7 @@ public class CutscenePlayer : MonoBehaviour
 
     public void PlayCutscene()
     {
-        if (isPlaying)
-            return;
+        if (isPlaying) return;
 
         if (videoPlayer == null || videoPlayer.clip == null)
         {
@@ -93,40 +77,8 @@ public class CutscenePlayer : MonoBehaviour
 
         Debug.Log("Вступительная кат-сцена запускается!");
 
-        if (fadeOverlay != null)
-            StartCoroutine(FadeOutBeforeCutscene());
-        else
-            StartCutsceneImmediately();
-    }
-
-    IEnumerator FadeOutBeforeCutscene()
-    {
-        Image fadeImage = fadeOverlay.GetComponent<Image>();
-
-        if (fadeImage == null)
-        {
-            Debug.LogWarning("CutscenePlayer: на FadeOverlay нет компонента Image.");
-            StartCutsceneImmediately();
-            yield break;
-        }
-
-        float elapsed = 0f;
-        Color color = fadeImage.color;
-        color.a = 1f;
-        fadeImage.color = color;
-
-        while (elapsed < fadeOutDuration)
-        {
-            elapsed += Time.deltaTime;
-            color.a = Mathf.Lerp(1f, 0f, elapsed / fadeOutDuration);
-            fadeImage.color = color;
-            yield return null;
-        }
-
-        color.a = 0f;
-        fadeImage.color = color;
-        fadeOverlay.SetActive(false);
-
+        // ИЗМЕНЕНО: Убрали FadeOutBeforeCutscene. Запускаем видео сразу, 
+        // так как cutsceneCanvas перекроет чёрный экран (если у него выше Sort Order).
         StartCutsceneImmediately();
     }
 
@@ -152,7 +104,6 @@ public class CutscenePlayer : MonoBehaviour
 
     IEnumerator WaitForVideoEnd()
     {
-        // Ждём завершения видеоклипа.
         double duration = videoPlayer.clip.length;
 
         if (duration <= 0)
@@ -168,28 +119,36 @@ public class CutscenePlayer : MonoBehaviour
 
     void EndCutscene()
     {
-        if (cutsceneEnded)
-            return;
-
+        if (cutsceneEnded) return;
         cutsceneEnded = true;
 
         Debug.Log("Кат-сцена окончена. Игрок просыпается!");
 
+        // 1. Останавливаем видео и скрываем его
         if (videoPlayer != null)
             videoPlayer.Stop();
-
         if (cutsceneCanvas != null)
             cutsceneCanvas.SetActive(false);
-
         if (cutsceneScreen != null)
             cutsceneScreen.gameObject.SetActive(false);
 
+        // 2. ВКЛЮЧАЕМ чёрный экран обратно, чтобы скрыть момент телепортации игрока
+        if (fadeOverlay != null)
+        {
+            fadeOverlay.SetActive(true);
+            Image fadeImage = fadeOverlay.GetComponent<Image>();
+            if (fadeImage != null)
+            {
+                Color color = fadeImage.color;
+                color.a = 1f;
+                fadeImage.color = color;
+            }
+        }
+
+        // 3. Перемещаем игрока и включаем управление
         if (player != null)
         {
-            player.transform.position = playerSpawnPoint != null
-                ? playerSpawnPoint.position
-                : player.transform.position;
-
+            player.transform.position = playerSpawnPoint != null ? playerSpawnPoint.position : player.transform.position;
             if (playerSpawnPoint != null)
                 player.transform.rotation = playerSpawnPoint.rotation;
         }
@@ -200,11 +159,32 @@ public class CutscenePlayer : MonoBehaviour
         if (monster != null)
         {
             monster.gameObject.SetActive(true);
-
             if (monster.Agent != null)
                 monster.Agent.isStopped = false;
         }
 
-        Debug.Log("Вступление завершено. Управление игроком включено.");
+        // 4. Плавно убираем чёрный экран, открывая игру
+        StartCoroutine(FadeOutToGameplay());
+    }
+
+    IEnumerator FadeOutToGameplay()
+    {
+        Image fadeImage = fadeOverlay.GetComponent<Image>();
+        float elapsed = 0f;
+        Color color = fadeImage.color;
+
+        while (elapsed < fadeOutDuration)
+        {
+            elapsed += Time.deltaTime;
+            color.a = Mathf.Lerp(1f, 0f, elapsed / fadeOutDuration);
+            fadeImage.color = color;
+            yield return null;
+        }
+
+        color.a = 0f;
+        fadeImage.color = color;
+        fadeOverlay.SetActive(false); // Полностью отключаем, чтобы не мешал
+
+        Debug.Log("Вступление завершено. Управление игроком включено, мир открыт.");
     }
 }
